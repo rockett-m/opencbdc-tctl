@@ -19,7 +19,9 @@ aws s3 cp "s3://${BINARIES_S3_BUCKET}/binaries/$SEED_COMMIT.tar.gz" ./binaries.t
 tar -xvf binaries.tar.gz tools/shard-seeder/shard-seeder
 rm -rf binaries.tar.gz
 
-shard_range=$(expr 255 / $SEED_SHARDS + 1)
+## shard_range=$(expr 255 / $SEED_SHARDS + 1)
+## Align shard range calculation with shard seeder
+shard_range=$(expr 256 / $SEED_SHARDS)
 
 echo "Checking if we are dealing with an old or new shard-seeder"
 
@@ -46,6 +48,7 @@ else
         # Generate it - doesn't work for sentinel attestations
         touch config.cfg
         if [ "$SEED_MODE" = "1" ]; then
+            echo "Seed mode is 1"
             printf "2pc=1\n" >> config.cfg
             printf "coordinator_count=1\ncoordinator0_count=1\ncoordinator0_0_endpoint=\"127.0.0.1:80\"\ncoordinator0_0_raft_endpoint=\"127.0.0.1:80\"\n" >> config.cfg
             printf "sentinel_count=1\nsentinel0_endpoint=\"127.0.0.1:80\"\n" >> config.cfg
@@ -54,9 +57,17 @@ else
             do
                 shard_start=$(($i * ${shard_range}))
                 shard_end=$((${shard_start} + ${shard_range} - 1))
+
+                ## align with shard seeder - if range is not integer, adjust end to cover full range
+                if [ $i -eq $((SEED_SHARDS-1)) ]; then
+                    echo "Adjust shard_end $shard_end to 255"
+                    shard_end=255
+                fi
+
                 printf "shard${i}_start=${shard_start}\nshard${i}_end=${shard_end}\nshard${i}_count=1\nshard${i}_0_endpoint=\"127.0.0.1:80\"\nshard${i}_0_raft_endpoint=\"127.0.0.1:80\"\nshard${i}_0_readonly_endpoint=\"127.0.0.1:80\"\n" >> config.cfg
             done
         else
+            echo "Seed mode is not 1"
             printf "sentinel_count=1\nsentinel0_endpoint=\"127.0.0.1:80\"\n" >> config.cfg
             printf "archiver_count=1\narchiver0_endpoint=\"127.0.0.1:80\"\narchiver0_db=\"db\"\n" >> config.cfg
             printf "atomizer_count=1\natomizer0_endpoint=\"127.0.0.1:80\"\natomizer0_raft_endpoint=\"127.0.0.1:80\"\n" >> config.cfg
@@ -66,6 +77,13 @@ else
             do
                 shard_start=$(($i * ${shard_range}))
                 shard_end=$((${shard_start} + ${shard_range} - 1))
+
+                ## align with shard seeder - adjust end to cover full range
+                if [ $i -eq $((SEED_SHARDS-1)) ]; then
+                    echo "Adjust shard_end $shard_end to 255"
+                    shard_end=255
+                fi
+
                 printf "shard${i}_endpoint=\"127.0.0.1:80\"\nshard${i}_start=${shard_start}\nshard${i}_end=${shard_end}\nshard${i}_db=\"db\"\n" >> config.cfg
             done
         fi
@@ -87,6 +105,13 @@ maketar() {
         suffix="${base##*_}"
         shard_start=$(($suffix * ${shard_range}))
         shard_end=$((${shard_start} + ${shard_range} - 1))
+
+        ## align with shard sheeder - adjust end to cover full range, if needed
+        if [[ $suffix -eq $SEED_SHARDS-1 ]]; then
+            echo "Adjust shard_end $shard_end to 255, if needed, of final tar $suffix"
+            shard_end=255
+        fi
+
         target="${base%_*}_${shard_start}_${shard_end}_${SEED_COMMIT}.tar"
     fi
     echo "Making tar [$target] of [$f]"
